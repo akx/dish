@@ -26,8 +26,9 @@ var Dish = (function() {
 		return JSON.stringify(s.toString());
 	}
 	
-	function massageExpr(expr) {
-		return expr.replace(/@/g, "this.");
+	function massageExpr(expr, options) {
+		if(options.atSignThis) expr = expr.replace(/@/g, "this.");
+		return expr;
 	}
 	
 	function extend() {
@@ -54,6 +55,17 @@ var Dish = (function() {
 	Blocks["if"] = function(c, e) {
 		e.enter("if", "if(" + c.args + ") {");
 	};
+
+	Blocks["elif"] = function(c, e) {
+		e.exit("if", "}");
+		e.enter("if", "else if(" + c.args + ") {");
+	};
+
+	Blocks["else"] = function(c, e) {
+		e.exit("if", "}");
+		e.enter("if", "else {");
+	};
+
 	Blocks["endif"] = Blocks["/if"] = function(c, e) {
 		e.exit("if", "}");
 	};
@@ -64,7 +76,7 @@ var Dish = (function() {
 		/*
 			syntax: {% fori <source> <object_var> <counter_var> %}...{% /for %}
 		*/
-		var source = massageExpr(c.argsArr[0]);
+		var source = massageExpr(c.argsArr[0], e.options);
 		var objVar = c.argsArr[1];
 		var counterName = c.argsArr[2] || ("_C" + c.i);
 		var lenVarName = "_L" + c.i;
@@ -93,12 +105,12 @@ var Dish = (function() {
 	
 	
 	
-	function tokenize(tpl, trimLiterals) {
+	function tokenize(tpl, options) {
 		var stream = [];
 		var b_re = new RegExp(b_re_src, "g");
 		var last = 0;
 		var m;
-		trimLiterals = !!trimLiterals;
+		trimLiterals = !!options.trimLiterals;
 		
 		function extractLiteral(start, end) {
 			var literal = tpl.substring(start, end);
@@ -112,7 +124,7 @@ var Dish = (function() {
 			if(!!m[2]) { // control structure
 				var args = trim(m[2]).split(" ");
 				var verb = args.shift().toLowerCase();
-				var argsStr = massageExpr(args.join(" "));
+				var argsStr = massageExpr(args.join(" "), options);
 				stream.push({"control": verb, "args": argsStr, "argsArr": args});
 				continue;
 			}
@@ -123,7 +135,7 @@ var Dish = (function() {
 					noEscape = true;
 					cont = cont.substring(0, cont.length - 1);
 				}
-				cont = massageExpr(cont);
+				cont = massageExpr(cont, options);
 				try {
 					var _func = new Function(cont);
 				} catch(e) {
@@ -164,9 +176,10 @@ var Dish = (function() {
 	}
 
 	
-	function mogrify(stream, autoescape) {
+	function mogrify(stream, options) {
 		var func_body = [];
 		var C;
+		var autoescape = !!options.autoescape;
 		var autoescapeNeeded = false;
 		var block_stack = [];
 		
@@ -194,9 +207,10 @@ var Dish = (function() {
 		}
 		
 		var E = {
-			emit: emit,
-			enter: enter,
-			exit: exit
+			options:	options,
+			emit:		emit,
+			enter:		enter,
+			exit:		exit
 		};
 		
 		enter("_dish_with_", "with(_scope_) {");
@@ -247,7 +261,8 @@ var Dish = (function() {
 	var defaults = {
 		"autoescape":		true,
 		"optimize":			true,
-		"trimLiterals":		true
+		"trimLiterals":		false,
+		"atSignThis":		false
 	};
 
 	
@@ -255,7 +270,7 @@ var Dish = (function() {
 	function compile(source, options) {
 		options = extend({}, defaults, options);
 		if(typeof source.text === "function") source = source.text(); // jQuery compatibility.
-		var stream = tokenize(source, options["trimLiterals"]);
+		var stream = tokenize(source, options);
 		if(options["optimize"]) optimize(stream);
 		var js = mogrify(stream, options["autoescape"]);
 		var templateFunc = new Function("_scope_", "F", js);
